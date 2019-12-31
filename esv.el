@@ -464,8 +464,6 @@ useful."
               (setq query-alist (assq-delete-all 'passage-query query-alist))
               (push (list 'passage-query passage) query-alist)))
         (switch-to-buffer
-         ;; (url-retrieve-synchronously "http://labs.bible.org/api/?type=xml&formatting=para&passage=Gen%201"))
-          ;; (esv-query query-alist)))
          (url-retrieve-synchronously
           (esv-query query-alist)))
         (prog1
@@ -836,6 +834,7 @@ change that by customizing `esv-reading-plan'."
 
 (defun create-chrono-reading-plan ()
   "Meant to create a reading plan for the NET bible. Parses text in the CURRENT BUFFER with format."
+  "Just copied the dates & passages from this reading plan: http://static.esvmedia.org/assets/pdfs/rp.chronological.pdf"
   "Jan 1 Gen 1‐3"
   "Jan 2 Gen 4‐7"
   "Jan 3 Gen 8‐11"
