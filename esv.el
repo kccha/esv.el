@@ -150,6 +150,19 @@ or you may just want to do it yourself."
                  (const :tag "No" "false"))
   :group 'esv)
 
+(defcustom esv-remove-verse-numbers "true"
+  "Should ESV output include verse numbers?"
+  :type '(choice (const :tag "Yes" nil)
+                 (const :tag "No" "true"))
+  :group 'esv)
+
+
+(defcustom esv-remove-copyright "true"
+  "Should remove copyright at the bottom of the buffer"
+  :type '(choice (const :tag "Yes" nil)
+                 (const :tag "No" "true"))
+  :group 'esv)
+
 (defcustom esv-start-date nil
   "When should an ESV reading plan start?"
   :type '(choice (const :tag "Default, January 1" nil)
@@ -451,6 +464,8 @@ useful."
               (setq query-alist (assq-delete-all 'passage-query query-alist))
               (push (list 'passage-query passage) query-alist)))
         (switch-to-buffer
+         ;; (url-retrieve-synchronously "http://labs.bible.org/api/?type=xml&formatting=para&passage=Gen%201"))
+          ;; (esv-query query-alist)))
          (url-retrieve-synchronously
           (esv-query query-alist)))
         (prog1
@@ -489,7 +504,7 @@ API."
                  (assq 'output-format query-alist)
                  (cadr (assq 'output-format query-alist)))
                 esv-output-format)))
-           (if (string= my-output-format "crossway-xml-1.0")
+           (when (string= my-output-format "crossway-xml-1.0")
                (unless (assq 'include-simple-entities query-alist)
                  (push (list 'include-simple-entities esv-include-simple-entities) query-alist)))
            my-output-format)
@@ -511,6 +526,48 @@ API."
       ((assq 'passage-query orig-alist)
        (concat "&passage=" (cadr (assq 'passage-query orig-alist))))))))
 
+(defun net-get-query (query-alist)
+  "Parse QUERY-ALIST into a URL, call the ESV web API to retrieve the
+data requested, and return the actual result.  This is the function that
+absolutely requires the variable `esv-key' to be set to something
+useful."
+  (if (or (assq 'key query-alist)
+          esv-key)
+      (let ((passage-query (assq 'passage-query query-alist))
+            (passage ""))
+        (if passage-query
+            (progn
+              (setq passage
+                    (with-temp-buffer
+                      (insert (cadr passage-query))
+                      (goto-char (point-min))
+                      (while (re-search-forward " " nil t)
+                        (replace-match "%20"))
+                      (buffer-string)))
+              (setq query-alist (assq-delete-all 'passage-query query-alist))
+              (push (list 'passage-query passage) query-alist)))
+	(let* ((base-url "http://labs.bible.org/api/?type=xml&formatting=para&passage=")
+	       (url base-url)
+	       (passage-item (assq 'passage-query query-alist))
+	       (passage-text nil))
+	  
+	  
+	  (setq passage-text (concat "&passage=" (cadr passage-item)))
+	  (setq url (concat url passage-text))
+	  (switch-to-buffer
+	   (url-retrieve-synchronously url)))
+          ;; (esv-query query-alist)))
+         ;; (url-retrieve-synchronously
+         ;;  (esv-query query-alist)))
+        (prog1
+            (buffer-substring
+             (save-excursion
+               (goto-char (point-min))
+               (re-search-forward "\n\n" nil t)
+               (point))
+             (point-max))
+          (kill-buffer nil)))
+    (error "No ESV key to use, please customize the ESV group and select a key.")))
 (defun esv-xml-to-list (xml)
   "Wrapper function to call `xml-parse-region' and return a list of
 elements."
@@ -518,12 +575,18 @@ elements."
     (insert xml)
     (xml-parse-region (point-min) (point-max))))
 
+(defun esv--prev-char ()
+  "Test previous character to determine if we should insert a space."
+  (looking-back "[a-zA-Z.,\\(\\)\"'?;]" (- (point) 1))
+  )
+
 (defun esv-walk-tree (esv-xml)
   "Process XML returned when `esv-output-format' is \"crossway-xml-1.0\"
 into propertized text suitable for display in `esv-display-mode'."
   (with-temp-buffer
     (dolist (cb esv-xml)
       (if (eq (car cb) 'crossway-bible)
+	  (let ((pastFirstVerse nil))
           (dolist (passage cb)
             (cond
              ((and (listp passage)
@@ -544,9 +607,18 @@ into propertized text suitable for display in `esv-display-mode'."
                           (cond
                            ((and (listp verse-item)
                                  (eq (car verse-item) 'verse-num))
-                            (insert (propertize
-                                     (concat " [" (car (last verse-item)) "] ")
-                                     'face 'font-lock-variable-name-face)))
+			   ;; kcc-start
+			    
+			    (if esv-remove-verse-numbers
+			      (when (esv--prev-char)
+				(insert " "))
+			      (insert (propertize
+				       (concat " [" (car (last verse-item)) "] ")
+				       'face 'font-lock-variable-name-face))))
+                            ;; (insert (propertize
+                            ;;          (concat " [" (car (last verse-item)) "] ")
+                            ;;          'face 'font-lock-variable-name-face)))
+			   ;; kcc-end
                            ((and (listp verse-item)
                                  (eq (car verse-item) 'woc))
                             (dolist (woc-elem (cdr verse-item))
@@ -563,10 +635,89 @@ into propertized text suitable for display in `esv-display-mode'."
                             (insert verse-item))))))))))
              ((and (listp passage)
                    (eq (car passage) 'copyright))
-              (insert (propertize (car (last passage))
-                                  'face 'font-lock-doc-face)))
+	      (unless esv-remove-copyright
+		(insert (propertize (car (last passage))
+				    'face 'font-lock-doc-face))))
              ((stringp passage)
-              (insert passage))))))
+              (insert passage)))))))
+    (fill-region (point-min) (point-max))
+    (buffer-string)))
+
+(defun net-walk-tree (net-xml)
+  "Process XML returned when `esv-output-format' is \"crossway-xml-1.0\"
+into propertized text suitable for display in `esv-display-mode'."
+  (with-temp-buffer
+    (dolist (cb net-xml)
+      (if (eq (car cb) 'bible)
+	  (let ((pastFirstVerse nil))
+          (dolist (passage cb)
+            (cond
+             ((and (listp passage)
+                   (eq (car passage) 'item))
+              (dolist (content passage)
+                (cond
+		 ((and (listp content)
+                       (eq (car content) 'text))
+		  
+		  (let ((text (car (last content))))
+		    (setq text (replace-regexp-in-string "\342\200\234" "\"" text))
+		    (setq text (replace-regexp-in-string "\342\200\235" "\"" text))
+		    (setq text (replace-regexp-in-string "\342\200\223" "-" text))
+		    (setq text (replace-regexp-in-string "\342\200\231" "'" text))
+		    (setq text (replace-regexp-in-string "\342\200\230" "'" text))
+		    (setq text (replace-regexp-in-string "<[^>]*>" "\n" text))
+		    (insert text)
+		    )
+		  )
+                 ((and (listp content)
+                       (eq (car content) 'reference))
+                  (insert (propertize (car (last content))
+                                      'face 'font-lock-variable-name-face)
+                          "\n"))
+                 ((and (listp content)
+                       (eq (car content) 'content))
+                  (dolist (verse-unit content)
+                    (if (and (listp verse-unit)
+                             (eq (car verse-unit) 'verse-unit))
+                        (dolist (verse-item verse-unit)
+                          (cond
+                           ((and (listp verse-item)
+                                 (eq (car verse-item) 'verse-num))
+			   ;; kcc-start
+			    
+			    (if esv-remove-verse-numbers
+			      (when (esv--prev-char)
+				(insert " "))
+			      (insert (propertize
+				       (concat " [" (car (last verse-item)) "] ")
+				       'face 'font-lock-variable-name-face))))
+                            ;; (insert (propertize
+                            ;;          (concat " [" (car (last verse-item)) "] ")
+                            ;;          'face 'font-lock-variable-name-face)))
+			   ;; kcc-end
+                           ((and (listp verse-item)
+                                 (eq (car verse-item) 'woc))
+                            (dolist (woc-elem (cdr verse-item))
+                              (if (stringp woc-elem)
+                                  (insert woc-elem))))
+                           ; thanks to Ben from edginet.org for this
+                           ; otherwise the Divine Name gets lost
+                           ((and (listp verse-item)
+                                 (eq (car verse-item) 'span))
+                            (dolist (span-elem (cdr verse-item))
+                              (if (stringp span-elem)
+                                  (insert span-elem))))
+                           ((stringp verse-item)
+                            (insert verse-item))))))))))
+             ((and (listp passage)
+                   (eq (car passage) 'copyright))
+	      (unless esv-remove-copyright
+		(insert (propertize (car (last passage))
+				    'face 'font-lock-doc-face))))
+             ((stringp passage)
+              (insert passage)))))))
+    (goto-char (point-min))
+    
     (fill-region (point-min) (point-max))
     (buffer-string)))
 
@@ -584,6 +735,27 @@ any well-formed Bible reference."
   (goto-char (point-min))
   (toggle-read-only 1)
   (esv-display-mode))
+
+(defun net-passage (reference)
+  "Fetch and display Bible REFERENCE from the ESV web API.
+
+This is the primary interactive function in esv.el.  REFERENCE can be
+any well-formed Bible reference."
+  (interactive "MNET reference: ")
+  (switch-to-buffer-other-window
+   (generate-new-buffer (concat "*ESV: " reference "*")))
+  (insert (net-walk-tree
+           (esv-xml-to-list
+            (net-get-query (list (list 'passage-query reference))))))
+  (goto-char (point-min))
+  (toggle-read-only 1)
+  (esv-display-mode))
+
+(defun net-get-passage-string (reference)
+  "Retrieves a passage from NET Bible."
+  (net-walk-tree
+   (esv-xml-to-list
+    (net-get-query (list (list 'passage-query reference))))))
 
 (defun esv-region (start end)
   "Fetch and display Bible reference in region from START to END
@@ -662,8 +834,101 @@ change that by customizing `esv-reading-plan'."
   (toggle-read-only 1)
   (esv-display-mode))
 
+(defun create-chrono-reading-plan ()
+  "Meant to create a reading plan for the NET bible. Parses text in the CURRENT BUFFER with format."
+  "Jan 1 Gen 1‐3"
+  "Jan 2 Gen 4‐7"
+  "Jan 3 Gen 8‐11"
+  "Jan 4 Job 1‐5"
+  "Jan 5 Job 6‐9"
+  "Jan 6 Job 10‐13"
+  "Jan 7 Job 14‐16"
+  "Jan 8 Job 17‐20"
+  "Jan 9 Job 21‐23"
+  "Jan 10 Job 24‐28"
+  "Jan 11 Job 29‐31"
+  "Jan 12 Job 32‐34"
+  "Jan 13 Job 35‐37"
+  "Jan 14 Job 38‐39"
+  "Jan 15 Job 40‐42"
+  "Jan 16 Gen 12‐15"
+  "Jan 17 Gen 16‐18"
+  "Jan 18 Gen 19‐21"
+  "Jan 19 Gen 22‐24"
+  "Jan 20 Gen 25‐26"
+  "Jan 21 Gen 27‐29"
+  (interactive)
+  (let* ((old-buffer (current-buffer))
+	 (passages nil))
+    (with-temp-buffer
+      (insert "test")
+      (insert-buffer-substring old-buffer)
+      (goto-char (point-min))
+      (while (re-search-forward "[0-9]+" nil t)
+	(forward-char)
+	(kill-line)
+	(setq passages (append passages (list (substring-no-properties (current-kill 0)))))
+	))
+
+    (reverse passages)
+    (switch-to-buffer-other-window
+     (generate-new-buffer "NET"))
+    
+    
+    (let* ((currentWeek 1)
+	   (weekCount 5)
+	   (dayOfWeek 4) ;; Start of the year is on the 4 day of the week in 2020
+	   (weekPassages nil)
+	   )
+      (while (<= currentWeek weekCount)
+      	(let ((currentWeekPassage (list currentWeek)))
+      	  (while (and (<= dayOfWeek 7) passages)
+      	    (let ((currentPassage (car passages)))
+      	      (setq passages (cdr passages))
+	      ;; TODO: Find a better way to append to the end of a list.
+      	      (setq currentWeekPassage (append currentWeekPassage (list currentPassage)))
+      	      )
+      	    (setq dayOfWeek (1+ dayOfWeek))
+      	    )
+	  (setq weekPassages (append weekPassages (list currentWeekPassage)))
+      	  )
+      	(setq dayOfWeek 1)
+	(setq currentWeek (1+ currentWeek))
+      	)
+      (dolist (currentWeekPassage weekPassages)
+	(let* ((currentWeek (car currentWeekPassage))
+	       (curPassages (cdr currentWeekPassage)))
+	  (insert "\n")
+	  (insert "\n")
+	  (insert "\n")
+	  (insert "\n")
+	  (insert (concat "Week: " (number-to-string currentWeek)))
+	  (insert "\n")
+	  (insert "\n")
+	  (dolist (passage curPassages)
+	    (insert passage)
+	    (insert "\n")
+	    (insert "\n")
+	    )
+	  (insert "\n")
+	  (insert "\\pagebreak")
+	  (insert "\n")
+	  (dolist (passage curPassages)
+	    (insert (net-get-passage-string passage))
+	    )
+	  (insert "\n")
+	  (insert "\\pagebreak")
+	  (insert "\n")
+	  )
+	)
+      )
+    )
+  )
+
 (defalias 'esv 'esv-passage)
+(defalias 'net 'net-passage)
 
 (provide 'esv)
-
+(provide 'net)
+(provide 'create-chrono-reading-plan)
 ;;; esv.el ends here
