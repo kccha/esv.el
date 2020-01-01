@@ -641,6 +641,11 @@ into propertized text suitable for display in `esv-display-mode'."
     (fill-region (point-min) (point-max))
     (buffer-string)))
 
+(defun net--prev-char-needs-space ()
+  "Test previous character to determine if we should insert a space."
+  (looking-back "[a-zA-Z.,\\(\\)\"'?;]" (- (point) 1))
+  )
+
 (defun net-walk-tree (net-xml)
   "Process XML returned when `esv-output-format' is \"crossway-xml-1.0\"
 into propertized text suitable for display in `esv-display-mode'."
@@ -658,6 +663,8 @@ into propertized text suitable for display in `esv-display-mode'."
                        (eq (car content) 'text))
 		  
 		  (let ((text (car (last content))))
+		    (if (net--prev-char-needs-space)
+			  (insert " "))
 		    (setq text (replace-regexp-in-string "\342\200\234" "\"" text))
 		    (setq text (replace-regexp-in-string "\342\200\235" "\"" text))
 		    (setq text (replace-regexp-in-string "\342\200\223" "-" text))
@@ -832,7 +839,7 @@ change that by customizing `esv-reading-plan'."
   (toggle-read-only 1)
   (esv-display-mode))
 
-(defun create-chrono-reading-plan ()
+(defun net-reading-plan ()
   "Meant to create a reading plan for the NET bible. Parses text in the CURRENT BUFFER with format."
   "Just copied the dates & passages from this reading plan: http://static.esvmedia.org/assets/pdfs/rp.chronological.pdf"
   "Jan 1 Gen 1‐3"
@@ -860,7 +867,6 @@ change that by customizing `esv-reading-plan'."
   (let* ((old-buffer (current-buffer))
 	 (passages nil))
     (with-temp-buffer
-      (insert "test")
       (insert-buffer-substring old-buffer)
       (goto-char (point-min))
       (while (re-search-forward "[0-9]+" nil t)
@@ -875,10 +881,12 @@ change that by customizing `esv-reading-plan'."
     
     
     (let* ((currentWeek 1)
-	   (weekCount 5)
+	   (weekCount 4)
 	   (dayOfWeek 4) ;; Start of the year is on the 4 day of the week in 2020
 	   (weekPassages nil)
 	   )
+      
+      (insert "#+LATEX_HEADER: \\setlength{\\parindent}{15pt}")
       (while (<= currentWeek weekCount)
       	(let ((currentWeekPassage (list currentWeek)))
       	  (while (and (<= dayOfWeek 7) passages)
@@ -901,7 +909,7 @@ change that by customizing `esv-reading-plan'."
 	  (insert "\n")
 	  (insert "\n")
 	  (insert "\n")
-	  (insert (concat "Week: " (number-to-string currentWeek)))
+	  (insert (concat "Week " (number-to-string currentWeek)))
 	  (insert "\n")
 	  (insert "\n")
 	  (dolist (passage curPassages)
@@ -911,6 +919,7 @@ change that by customizing `esv-reading-plan'."
 	    )
 	  (insert "\n")
 	  (insert "\\pagebreak")
+	  (insert "\n")
 	  (insert "\n")
 	  (dolist (passage curPassages)
 	    (insert (net-get-passage-string passage))
@@ -929,5 +938,5 @@ change that by customizing `esv-reading-plan'."
 
 (provide 'esv)
 (provide 'net)
-(provide 'create-chrono-reading-plan)
+(provide 'net-reading-plan)
 ;;; esv.el ends here
