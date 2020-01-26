@@ -667,7 +667,7 @@ into propertized text suitable for display in `esv-display-mode'."
 			  (insert " "))
 		    (setq text (replace-regexp-in-string "\342\200\234" "\"" text))
 		    (setq text (replace-regexp-in-string "\342\200\235" "\"" text))
-		    (setq text (replace-regexp-in-string "\342\200\223" "-" text))
+		    (setq text (replace-regexp-in-string "\342\200\223" "--" text))
 		    (setq text (replace-regexp-in-string "\342\200\231" "'" text))
 		    (setq text (replace-regexp-in-string "\342\200\230" "'" text))
 		    (setq text (replace-regexp-in-string "<[^>]*>" "\n" text))
@@ -839,7 +839,7 @@ change that by customizing `esv-reading-plan'."
   (toggle-read-only 1)
   (esv-display-mode))
 
-(defun net-reading-plan ()
+(defun net-reading-plan (startWeek numWeeks)
   "Meant to create a reading plan for the NET bible. Parses text in the CURRENT BUFFER with format."
   "Just copied the dates & passages from this reading plan: http://static.esvmedia.org/assets/pdfs/rp.chronological.pdf"
   "Jan 1 Gen 1‐3"
@@ -863,7 +863,7 @@ change that by customizing `esv-reading-plan'."
   "Jan 19 Gen 22‐24"
   "Jan 20 Gen 25‐26"
   "Jan 21 Gen 27‐29"
-  (interactive)
+  (interactive "nStart Week: \nnNumber of Weeks: ")
   (let* ((old-buffer (current-buffer))
 	 (passages nil))
     (with-temp-buffer
@@ -880,17 +880,27 @@ change that by customizing `esv-reading-plan'."
      (generate-new-buffer "NET"))
     
     
+    (message (concat "Start week: " (number-to-string startWeek)))
     (let* ((currentWeek 1)
-	   (weekCount 4)
+	   (weekCount (+ numWeeks 4))
 	   (dayOfWeek 4) ;; Start of the year is on the 4 day of the week in 2020
 	   (weekPassages nil)
 	   )
       
-      (insert "#+LATEX_HEADER: \\setlength{\\parindent}{15pt}")
+      ;(insert "#+LATEX_HEADER: \\setlength{\\parindent}{15pt}")
+      (while (< currentWeek startWeek)
+	(while (and (<= dayOfWeek 7) passages)
+	  (setq passages (cdr passages))
+	  (setq dayOfWeek (1+ dayOfWeek))
+	  )
+      	(setq dayOfWeek 1)
+	(setq currentWeek (1+ currentWeek))
+	)
       (while (<= currentWeek weekCount)
       	(let ((currentWeekPassage (list currentWeek)))
       	  (while (and (<= dayOfWeek 7) passages)
       	    (let ((currentPassage (car passages)))
+	      (message (concat "Week " (number-to-string currentWeek) ": " currentPassage))
       	      (setq passages (cdr passages))
 	      ;; TODO: Find a better way to append to the end of a list.
       	      (setq currentWeekPassage (append currentWeekPassage (list currentPassage)))
@@ -918,14 +928,14 @@ change that by customizing `esv-reading-plan'."
 	    (insert "\n")
 	    )
 	  (insert "\n")
-	  (insert "\\pagebreak")
+	  ;(insert "\\pagebreak")
 	  (insert "\n")
 	  (insert "\n")
 	  (dolist (passage curPassages)
 	    (insert (net-get-passage-string passage))
 	    )
 	  (insert "\n")
-	  (insert "\\pagebreak")
+	  ;(insert "\\pagebreak")
 	  (insert "\n")
 	  )
 	)
